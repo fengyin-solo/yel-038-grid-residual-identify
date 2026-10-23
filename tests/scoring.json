@@ -80,15 +80,35 @@
       "rationale": "profile fingerprint length is refused；这验证公开边界和拒收口径，失败会产生越界输入或错误放行。",
       "weight": 0.029
     },
+    "test_outputs.py::test_profile_count_above_max_slots_is_refused": {
+      "priority": "boundary",
+      "rationale": "profile count above max slots is refused；这验证批次容量上限，失败会把超额档案错误纳入结算。",
+      "weight": 0.002
+    },
+    "test_outputs.py::test_three_slots_are_accepted": {
+      "priority": "boundary",
+      "rationale": "three slots are accepted；这验证最小合法批次仍能完成全组互配，失败会拒收正常小批次。",
+      "weight": 0.002
+    },
     "test_outputs.py::test_total_residual_matches_assignment": {
       "priority": "core",
       "rationale": "total residual matches assignment；这是任务的主交付路径，失败意味着核心业务结果不可用。",
       "weight": 0.15
     },
+    "test_outputs.py::test_twelve_slots_are_accepted": {
+      "priority": "boundary",
+      "rationale": "twelve slots are accepted；这验证最大合法批次仍能完成全局对应，失败会截断容量上端。",
+      "weight": 0.002
+    },
+    "test_outputs.py::test_two_slots_are_refused": {
+      "priority": "boundary",
+      "rationale": "two slots are refused；这验证低于三组的坏批次被拒收，失败会接受不完整覆盖输入。",
+      "weight": 0.002
+    },
     "test_outputs.py::test_wrong_argument_count_is_refused": {
       "priority": "boundary",
       "rationale": "wrong argument count is refused；这验证公开边界和拒收口径，失败会产生越界输入或错误放行。",
-      "weight": 0.029
+      "weight": 0.021
     }
   },
   "weight_policy": {

@@ -5,6 +5,7 @@ import json
 import os
 import subprocess
 import sys
+from pathlib import Path
 
 import pytest
 
@@ -94,6 +95,32 @@ OUTPUT_KEYS = ['mesh_id', 'status', 'solver_assignments', 'total_residual', 'acc
 LEDGER_KEYS = ['mesh_id', 'input_sha256', 'result_sha256', 'total_residual']
 
 
+def expose_candidate_path(path):
+    if Path("/tmp") not in path.parents:
+        return
+    for ancestor in path.parents:
+        if ancestor == Path("/tmp"):
+            break
+        ancestor.chmod(0o755)
+    path.chmod(0o777)
+
+
+def candidate_command(tmp_path, *arguments):
+    expose_candidate_path(tmp_path)
+    if os.geteuid() == 0 and Path("/usr/bin/setpriv").is_file():
+        return [
+            "/usr/bin/setpriv",
+            "--reuid=65534",
+            "--regid=65534",
+            "--clear-groups",
+            "--",
+            "/usr/local/bin/python3",
+            ENTRY,
+            *map(str, arguments),
+        ]
+    return [sys.executable, ENTRY, *map(str, arguments)]
+
+
 def base_payload():
     return {
         "mesh_id": "GRID-STD-7",
@@ -109,10 +136,10 @@ def invoke(tmp_path, payload=None, ledger=None, raw=None, output_name="result.js
     if raw is None:
         raw = json.dumps(payload, ensure_ascii=False, separators=(",", ":")) + "\n"
     source.write_bytes(raw.encode("utf-8"))
-    command = [sys.executable, ENTRY, str(source), str(target)]
+    command = [str(value) for value in (source, target)]
     if ledger is not None:
         command.append(str(ledger))
-    completed = subprocess.run(command, capture_output=True, text=True, timeout=30)
+    completed = subprocess.run(candidate_command(tmp_path, *command), capture_output=True, text=True, timeout=30)
     return completed, source, target
 
 
@@ -255,6 +282,65 @@ def test_duplicate_slot_is_refused(tmp_path):
     assert control_result.returncode == 1 and control_result.stderr == "数值拒收: BAD_SOLVER\n" and not control_output.exists()
 
 
+def test_three_slots_are_accepted(tmp_path):
+    """题面：「程序仍需接受 3 至 12 个槽位的合法批次。」"""
+    payload = base_payload()
+    payload["limits"]["max_slots"] = 3
+    payload["profiles"] = payload["profiles"][:3]
+    payload["readings"] = payload["readings"][:3]
+    result, _, output = invoke(tmp_path, payload)
+    document = read(output)
+    assert result.returncode == 0
+    assert len(document["solver_assignments"]) == 3
+
+
+def test_two_slots_are_refused(tmp_path):
+    """题面：「少于 3 组或超过 max_slots 都属于坏输入。」"""
+    payload = base_payload()
+    payload["limits"]["max_slots"] = 3
+    payload["profiles"] = payload["profiles"][:2]
+    payload["readings"] = payload["readings"][:2]
+    result, _, output = invoke(tmp_path, payload)
+    assert result.returncode == 1 and result.stderr == "数值拒收: BAD_SOLVER\n" and not output.exists()
+
+
+def test_twelve_slots_are_accepted(tmp_path):
+    """题面：「三组与十二组都必须能形成完整对应」。"""
+    payload = base_payload()
+    payload["limits"]["max_slots"] = 12
+    extra_profiles = [
+        {"solver_id": "GRID-K", "fingerprint": [0.111, 0.222, 0.333]},
+        {"solver_id": "GRID-L", "fingerprint": [1.111, 1.222, 1.333]},
+    ]
+    extra_readings = []
+    for index, profile in enumerate(extra_profiles, start=1):
+        fingerprint = profile["fingerprint"]
+        extra_readings.append(
+            {
+                "slot": f"CH-X{index}",
+                "field_x": fingerprint[0],
+                "field_y": fingerprint[1] / 0.4,
+                "residual_norm": fingerprint[2] * 0.65,
+                "step_size": 0.4,
+                "temperature_c": 24.0,
+            }
+        )
+    payload["profiles"].extend(extra_profiles)
+    payload["readings"].extend(extra_readings)
+    result, _, output = invoke(tmp_path, payload)
+    document = read(output)
+    assert result.returncode == 0
+    assert len(document["solver_assignments"]) == 12
+
+
+def test_profile_count_above_max_slots_is_refused(tmp_path):
+    """题面：「profiles 与 readings 数量必须相等、位于 3 到 max_slots 之间」。"""
+    payload = base_payload()
+    payload["limits"]["max_slots"] = 9
+    result, _, output = invoke(tmp_path, payload)
+    assert result.returncode == 1 and result.stderr == "数值拒收: BAD_SOLVER\n" and not output.exists()
+
+
 def test_ledger_has_exact_shape_and_is_idempotent(tmp_path):
     """题面：「完全相同的结果重新导入时，留痕簿字节不发生改变。」"""
     ledger = tmp_path / "trail.jsonl"
@@ -285,7 +371,7 @@ def test_ledger_path_equal_to_output_is_refused(tmp_path):
     source = tmp_path / "readings.json"
     target = tmp_path / "same.json"
     source.write_text(json.dumps(payload, separators=(",", ":")), encoding="utf-8")
-    result = subprocess.run([sys.executable, ENTRY, str(source), str(target), str(target)], capture_output=True, text=True, timeout=30)
+    result = subprocess.run(candidate_command(tmp_path, source, target, target), capture_output=True, text=True, timeout=30)
     assert result.returncode == 1 and result.stderr == "残差簿拒收: BAD_GRID_LEDGER\n" and not target.exists()
 
 
@@ -295,7 +381,7 @@ def test_io_failure_preserves_existing_target(tmp_path):
     target.mkdir()
     source = tmp_path / "readings.json"
     source.write_text(json.dumps(base_payload(), separators=(",", ":")), encoding="utf-8")
-    result = subprocess.run([sys.executable, ENTRY, str(source), str(target)], capture_output=True, text=True, timeout=30)
+    result = subprocess.run(candidate_command(tmp_path, source, target), capture_output=True, text=True, timeout=30)
     assert result.returncode == 1 and result.stderr == "归档失败: GRID_IO\n"
     assert target.exists() and target.is_dir() and not any(target.iterdir()) and "traceback" not in result.stderr.lower()
 
@@ -303,5 +389,5 @@ def test_io_failure_preserves_existing_target(tmp_path):
 def test_wrong_argument_count_is_refused(tmp_path):
     """题面：「命令行参数数量超出 3 或 4 时，退出 1 并写 数值拒收: BAD_SOLVER。」"""
     target = tmp_path / "result.json"
-    result = subprocess.run([sys.executable, ENTRY], capture_output=True, text=True, timeout=30)
+    result = subprocess.run(candidate_command(tmp_path), capture_output=True, text=True, timeout=30)
     assert result.returncode == 1 and result.stderr == "数值拒收: BAD_SOLVER\n" and not target.exists()
