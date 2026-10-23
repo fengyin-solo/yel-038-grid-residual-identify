@@ -302,7 +302,7 @@ def test_duplicate_slot_is_refused(tmp_path):
 
 
 def test_three_slots_are_accepted(tmp_path):
-    """题面：「程序仍需接受 3 至 12 个槽位的合法批次。」"""
+    """题面：「程序统一接受 3 至 12 个槽位的合法批次」"""
     payload = base_payload()
     payload["limits"]["max_slots"] = 3
     payload["profiles"] = payload["profiles"][:3]
