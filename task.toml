@@ -1,0 +1,27 @@
+schema_version = "1.3"
+
+[task]
+name = "local/grid-residual-identify"
+authors = [{ name = "fengyin" }]
+description = "线性求解器升级后，八个迭代槽位的编号与参数档案发生错位。值班工程师只剩两个场分量、残差范数、步长和计算温度，需要先恢复求解器对应，再复核收敛残差。"
+keywords = ['iterative-solver', 'scaled-residual', 'global-assignment', 'audit-ledger']
+
+[agent]
+timeout_sec = 3600
+
+[environment]
+build_timeout_sec = 600
+cpus = 2
+memory_mb = 2048
+storage_mb = 4096
+gpus = 0
+allow_internet = true
+
+[verifier]
+timeout_sec = 600
+
+[metadata]
+difficulty = "hard"
+category = "numerical-computing"
+tags = ['iterative-solver', 'scaled-residual', 'global-assignment', 'audit-ledger']
+expert_time_estimate = "70m"
